@@ -1,5 +1,7 @@
 # Interview Prep Doc Agent
 
+[![tests](https://github.com/tlevin1/agent-for-google-doc/actions/workflows/tests.yml/badge.svg)](https://github.com/tlevin1/agent-for-google-doc/actions/workflows/tests.yml)
+
 A background agent that watches a Google Doc and automatically formats interview prep notes using Claude. Drop raw notes into a tab — recruiter call, job description, technical concepts — and the agent rewrites it into a structured, highlighted prep document within one poll cycle.
 
 ---
@@ -172,3 +174,19 @@ Applied automatically on every write:
 
 ## Notifications
 macOS notifications fire on every successful update and on errors. No extra setup needed — uses built-in `osascript`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+The tests cover the markdown-to-Google-Docs formatter, which is pure functions:
+line parsing, bold ranges, highlights and blank-line handling. No Google
+credentials or API key are needed.
+
+One of them guards a real bug: the Docs API indexes text in UTF-16 code units,
+while Python counts code points. An emoji like 🚀 is two units in Docs and one in
+Python, so every bold range after it used to land one character early. All
+ranges now go through a UTF-16 offset map.
