@@ -615,6 +615,16 @@ def _parse_lines(formatted_text: str) -> list[tuple[str, str, list]]:
     return parsed
 
 
+def _utf16_offsets(text: str) -> list[int]:
+    """offsets[i] = position of text[i] in UTF-16 code units, which is how Google
+    Docs indexes text. Characters outside the Basic Multilingual Plane (most
+    emoji) take two units, so Python string positions drift after each one."""
+    offsets = [0]
+    for ch in text:
+        offsets.append(offsets[-1] + (2 if ord(ch) > 0xFFFF else 1))
+    return offsets
+
+
 def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> list:
     requests = []
 
@@ -649,7 +659,9 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
         }
     })
 
-    doc_len = len(plain_text)
+    # Every Docs index below goes through this map: 1 + offsets[python_position].
+    offsets = _utf16_offsets(plain_text)
+    doc_len = offsets[-1]
 
     # 3a. Reset paragraph style
     requests.append({
@@ -683,12 +695,12 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
     })
 
     # 4. Apply per-line formatting
-    doc_cursor = 1
+    cursor = 0  # position in plain_text (code points)
 
     for plain_line, ltype, bolds in parsed:
         line_len = len(plain_line)
-        line_start = doc_cursor
-        line_end = doc_cursor + line_len
+        line_start = 1 + offsets[cursor]
+        line_end = 1 + offsets[cursor + line_len]
 
         if line_len > 0:
             if ltype in ("h1", "h2", "h3"):
@@ -726,8 +738,8 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
                 })
 
         for b_start, b_end in bolds:
-            abs_start = line_start + b_start
-            abs_end = line_start + b_end
+            abs_start = 1 + offsets[cursor + b_start]
+            abs_end = 1 + offsets[cursor + b_end]
             if abs_end > abs_start:
                 requests.append({
                     "updateTextStyle": {
@@ -737,12 +749,12 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
                     }
                 })
 
-        doc_cursor += line_len + 1
+        cursor += line_len + 1
 
     # 5. Highlight TODOs (yellow)
     for match in re.finditer(r'\[TODO[^\]]*\]', plain_text):
-        start = 1 + match.start()
-        end = 1 + match.end()
+        start = 1 + offsets[match.start()]
+        end = 1 + offsets[match.end()]
         requests.append({
             "updateTextStyle": {
                 "range": {"startIndex": start, "endIndex": end, "tabId": tab_id},
@@ -753,8 +765,8 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
 
     # 6. Highlight review flags (orange)
     for match in re.finditer(r'⚠️ Review:.*', plain_text):
-        start = 1 + match.start()
-        end = 1 + match.end()
+        start = 1 + offsets[match.start()]
+        end = 1 + offsets[match.end()]
         requests.append({
             "updateTextStyle": {
                 "range": {"startIndex": start, "endIndex": end, "tabId": tab_id},
@@ -765,8 +777,8 @@ def build_write_requests(formatted_text: str, tab_id: str, end_index: int) -> li
 
     # 7. Highlight skill gaps (red)
     for match in re.finditer(r'(⚠️ GAP:|❌ MISSING:).*', plain_text):
-        start = 1 + match.start()
-        end = 1 + match.end()
+        start = 1 + offsets[match.start()]
+        end = 1 + offsets[match.end()]
         requests.append({
             "updateTextStyle": {
                 "range": {"startIndex": start, "endIndex": end, "tabId": tab_id},

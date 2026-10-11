@@ -100,3 +100,29 @@ def test_find_tab_in_searches_nested_tabs():
 def test_unknown_parent_tab_defaults_to_technical_mode():
     assert infer_mode("Current Interviews ") == "interview"
     assert infer_mode("something else") == "technical"
+
+
+# Google Docs indexes text in UTF-16 code units; Python's len() counts code
+# points. Emoji outside the Basic Multilingual Plane are 2 units in Docs and 1
+# in Python, so every range after one used to land one position early.
+
+
+def utf16_slice(requests, start, end):
+    """What Google Docs would actually style: the text between two UTF-16 indices."""
+    units = text_of(requests).encode("utf-16-le")
+    return units[(start - 1) * 2 : (end - 1) * 2].decode("utf-16-le")
+
+
+def test_bold_after_emoji_lands_on_the_right_words():
+    reqs = build_write_requests("🚀 recruiter said **move fast**", "t", 1)
+    (start, end), = ranges(reqs, "bold")
+    assert utf16_slice(reqs, start, end) == "move fast"
+
+
+def test_ranges_on_later_lines_account_for_earlier_emoji():
+    reqs = build_write_requests("👍 great call\n## Next steps\n[TODO — prep]", "t", 1)
+    heading = next(r["updateTextStyle"]["range"] for r in reqs
+                   if r.get("updateTextStyle", {}).get("fields") == "bold,fontSize")
+    assert utf16_slice(reqs, heading["startIndex"], heading["endIndex"]) == "Next steps"
+    (todo,) = [utf16_slice(reqs, s, e) for s, e in ranges(reqs, "backgroundColor")]
+    assert todo == "[TODO — prep]"
