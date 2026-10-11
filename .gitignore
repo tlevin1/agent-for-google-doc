@@ -1,0 +1,23 @@
+# Google OAuth — never commit these
+credentials.json
+token.json
+
+# Environment / secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Personal background used in prompts
+background.md

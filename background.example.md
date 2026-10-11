@@ -1,0 +1,4 @@
+- N years at <Company>: <how your role started and how it has evolved>
+- Current work: <what you build, in which languages and frameworks>
+- <what kind of work you enjoy or are known for>
+- <a gap to be honest about, e.g. "limited production ownership">

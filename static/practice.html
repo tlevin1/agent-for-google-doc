@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interview Practice</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 680px;
+    margin: 40px auto;
+    padding: 0 20px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  select, button {
+    font-size: 1rem;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #8888;
+    background: transparent;
+    color: inherit;
+  }
+  button { cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { background: #2563eb; color: white; border-color: #2563eb; }
+  button.recording { background: #dc2626; color: white; border-color: #dc2626; }
+  #setup { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #session { display: none; margin-top: 28px; }
+  #progress { opacity: 0.6; font-size: 0.9rem; margin-bottom: 4px; }
+  #question {
+    font-size: 1.15rem;
+    font-weight: 600;
+    padding: 16px;
+    border-radius: 8px;
+    background: #8881;
+    margin-bottom: 12px;
+  }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  #transcript {
+    width: 100%;
+    min-height: 90px;
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #8888;
+    background: transparent;
+    color: inherit;
+    font-size: 1rem;
+  }
+  #feedback {
+    display: none;
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #22c55e22;
+    border: 1px solid #22c55e55;
+    white-space: pre-wrap;
+  }
+  #notes {
+    display: none;
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #8881;
+    white-space: pre-wrap;
+    font-size: 0.95rem;
+  }
+  #warning {
+    display: none;
+    background: #f59e0b33;
+    border: 1px solid #f59e0b88;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+  #next-row { margin-top: 16px; display: none; }
+  .hint { font-size: 0.85rem; opacity: 0.6; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Interview Practice</h1>
+
+<div id="warning"></div>
+
+<div id="setup">
+  <select id="tab-select"><option>Loading tabs…</option></select>
+  <button id="start-btn" class="primary" disabled>Start Practice</button>
+</div>
+
+<div id="session">
+  <div id="progress"></div>
+  <div id="question"></div>
+
+  <div id="controls">
+    <button id="speak-q-btn">🔊 Read Question</button>
+    <button id="record-btn">🎤 Record Answer</button>
+    <button id="submit-btn" class="primary" disabled>Submit for Feedback</button>
+  </div>
+
+  <textarea id="transcript" placeholder="Your answer will appear here as you speak — you can also edit it before submitting."></textarea>
+  <div class="hint">Recording appends to whatever's already in the box, so you can pause and resume.</div>
+
+  <div id="feedback"></div>
+  <div id="controls">
+    <button id="speak-fb-btn" style="display:none">🔊 Read Feedback</button>
+    <button id="notes-btn" style="display:none">Show My Notes</button>
+  </div>
+  <div id="notes"></div>
+
+  <div id="next-row">
+    <button id="next-btn" class="primary">Next Question →</button>
+  </div>
+</div>
+
+<script>
+const tabSelect = document.getElementById('tab-select');
+const startBtn = document.getElementById('start-btn');
+const session = document.getElementById('session');
+const progressEl = document.getElementById('progress');
+const questionEl = document.getElementById('question');
+const speakQBtn = document.getElementById('speak-q-btn');
+const recordBtn = document.getElementById('record-btn');
+const submitBtn = document.getElementById('submit-btn');
+const transcriptEl = document.getElementById('transcript');
+const feedbackEl = document.getElementById('feedback');
+const speakFbBtn = document.getElementById('speak-fb-btn');
+const notesBtn = document.getElementById('notes-btn');
+const notesEl = document.getElementById('notes');
+const nextRow = document.getElementById('next-row');
+const nextBtn = document.getElementById('next-btn');
+const warningEl = document.getElementById('warning');
+
+let questions = [];
+let currentIndex = 0;
+let recognition = null;
+let recognizing = false;
+
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canRecognize = !!SpeechRecognitionCtor;
+const canSpeak = 'speechSynthesis' in window;
+
+if (!canRecognize) {
+  warningEl.style.display = 'block';
+  warningEl.textContent = "This browser doesn't support voice input (try Chrome). You can still type your answer below.";
+  recordBtn.disabled = true;
+}
+if (!canSpeak) {
+  speakQBtn.style.display = 'none';
+}
+
+function speak(text) {
+  if (!canSpeak) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(utter);
+}
+
+async function loadTabs() {
+  try {
+    const res = await fetch('/api/tabs');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load tabs');
+    if (data.length === 0) throw new Error('No child tabs found under "Topics to Review"');
+    tabSelect.innerHTML = '';
+    data.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.title;
+      tabSelect.appendChild(opt);
+    });
+    startBtn.disabled = false;
+  } catch (e) {
+    tabSelect.innerHTML = '<option>Error loading tabs</option>';
+    warningEl.style.display = 'block';
+    warningEl.textContent = e.message;
+  }
+}
+
+async function startPractice() {
+  const tabId = tabSelect.value;
+  startBtn.disabled = true;
+  startBtn.textContent = 'Loading…';
+  try {
+    const res = await fetch(`/api/questions?tab_id=${encodeURIComponent(tabId)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load questions');
+    questions = data;
+    currentIndex = 0;
+    session.style.display = 'block';
+    showQuestion();
+  } catch (e) {
+    warningEl.style.display = 'block';
+    warningEl.textContent = e.message;
+  } finally {
+    startBtn.disabled = false;
+    startBtn.textContent = 'Start Practice';
+  }
+}
+
+function showQuestion() {
+  const q = questions[currentIndex];
+  progressEl.textContent = `Question ${currentIndex + 1} of ${questions.length}`;
+  questionEl.textContent = q.question;
+  transcriptEl.value = '';
+  feedbackEl.style.display = 'none';
+  feedbackEl.textContent = '';
+  notesEl.style.display = 'none';
+  notesBtn.textContent = 'Show My Notes';
+  speakFbBtn.style.display = 'none';
+  notesBtn.style.display = 'none';
+  nextRow.style.display = 'none';
+  submitBtn.disabled = true;
+  speak(q.question);
+}
+
+function setupRecognition() {
+  recognition = new SpeechRecognitionCtor();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  let baseText = '';
+
+  recognition.onstart = () => {
+    baseText = transcriptEl.value ? transcriptEl.value.trim() + ' ' : '';
+  };
+
+  recognition.onresult = (event) => {
+    let finalChunk = '';
+    let interimChunk = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const chunk = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalChunk += chunk;
+      else interimChunk += chunk;
+    }
+    if (finalChunk) baseText += finalChunk + ' ';
+    transcriptEl.value = (baseText + interimChunk).trim();
+    submitBtn.disabled = transcriptEl.value.trim().length === 0;
+  };
+
+  recognition.onerror = (event) => {
+    warningEl.style.display = 'block';
+    warningEl.textContent = `Mic error: ${event.error}`;
+  };
+
+  recognition.onend = () => {
+    recognizing = false;
+    recordBtn.textContent = '🎤 Record Answer';
+    recordBtn.classList.remove('recording');
+  };
+}
+
+function toggleRecording() {
+  if (!canRecognize) return;
+  if (!recognition) setupRecognition();
+
+  if (recognizing) {
+    recognition.stop();
+    recognizing = false;
+    recordBtn.textContent = '🎤 Record Answer';
+    recordBtn.classList.remove('recording');
+  } else {
+    recognition.start();
+    recognizing = true;
+    recordBtn.textContent = '⏹ Stop Recording';
+    recordBtn.classList.add('recording');
+  }
+}
+
+async function submitAnswer() {
+  const q = questions[currentIndex];
+  const userAnswer = transcriptEl.value.trim();
+  if (!userAnswer) return;
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Grading…';
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: q.question,
+        expected_answer: q.answer,
+        user_answer: userAnswer,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Feedback request failed');
+
+    feedbackEl.textContent = data.feedback;
+    feedbackEl.style.display = 'block';
+    notesEl.textContent = q.answer || '[no notes written for this question]';
+    speakFbBtn.style.display = canSpeak ? 'inline-block' : 'none';
+    notesBtn.style.display = 'inline-block';
+    nextRow.style.display = 'block';
+    speak(data.feedback);
+  } catch (e) {
+    warningEl.style.display = 'block';
+    warningEl.textContent = e.message;
+  } finally {
+    submitBtn.textContent = 'Submit for Feedback';
+    submitBtn.disabled = false;
+  }
+}
+
+function nextQuestion() {
+  if (currentIndex < questions.length - 1) {
+    currentIndex++;
+    showQuestion();
+  } else {
+    questionEl.textContent = "That's the last question in this tab. 🎉";
+    progressEl.textContent = `Question ${questions.length} of ${questions.length} — done`;
+    document.getElementById('controls').style.display = 'none';
+    transcriptEl.style.display = 'none';
+    nextRow.style.display = 'none';
+  }
+}
+
+startBtn.addEventListener('click', startPractice);
+speakQBtn.addEventListener('click', () => speak(questions[currentIndex].question));
+recordBtn.addEventListener('click', toggleRecording);
+submitBtn.addEventListener('click', submitAnswer);
+speakFbBtn.addEventListener('click', () => speak(feedbackEl.textContent));
+notesBtn.addEventListener('click', () => {
+  const showing = notesEl.style.display === 'block';
+  notesEl.style.display = showing ? 'none' : 'block';
+  notesBtn.textContent = showing ? 'Show My Notes' : 'Hide My Notes';
+});
+nextBtn.addEventListener('click', nextQuestion);
+transcriptEl.addEventListener('input', () => {
+  submitBtn.disabled = transcriptEl.value.trim().length === 0;
+});
+
+loadTabs();
+</script>
+</body>
+</html>
